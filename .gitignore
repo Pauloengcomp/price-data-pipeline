@@ -11,3 +11,6 @@ __pycache__/
 
 # Arquivos baixados pelo pipeline
 dags/downloads/
+
+# Instruções locais do agente de IA
+CLAUDE.md
