@@ -460,6 +460,33 @@ def verificar_se_novo(**context):
 
 
 
+def notificar_erro_slack(context):
+
+    slack_token = os.environ.get("SLACK_BOT_TOKEN")
+    if not slack_token:
+        print("SLACK_BOT_TOKEN não configurado — notificação de erro ignorada.")
+        return
+
+    client = WebClient(token=slack_token)
+
+    task_id = context.get("task_instance").task_id
+    dag_id = context.get("task_instance").dag_id
+    exec_date = context.get("execution_date")
+    exception = context.get("exception")
+
+    mensagem = (
+        f":red_circle: *Erro no pipeline {dag_id}*\n"
+        f"*Task:* `{task_id}`\n"
+        f"*Execução:* {exec_date}\n"
+        f"*Motivo:* {exception}"
+    )
+
+    try:
+        client.chat_postMessage(channel=SLACK_CHANNEL, text=mensagem)
+    except Exception as e:
+        print(f"Falha ao enviar notificação de erro para o Slack: {e}")
+
+
 def enviar_gold_para_slack(**context):
 
     slack_token = os.environ.get("SLACK_BOT_TOKEN")
@@ -580,7 +607,8 @@ with DAG(
 
     gold = PythonOperator(
         task_id="generate_gold",
-        python_callable=gerar_gold
+        python_callable=gerar_gold,
+        on_failure_callback=notificar_erro_slack
     )
     
     send_slack = PythonOperator(
