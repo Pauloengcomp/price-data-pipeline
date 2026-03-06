@@ -487,6 +487,17 @@ def notificar_erro_slack(context):
         print(f"Falha ao enviar notificação de erro para o Slack: {e}")
 
 
+def formatar_nome_slack(tipo, nome_arquivo):
+    # Extrai ano e mês do nome original, ex: Tabela_de_Medicamentos_2026_02_Fevereiro.txt
+    match = re.search(r'_(\d{4})_\d{2}_([A-Za-záéíóúâêîôûãõàèìòùçÁÉÍÓÚÂÊÎÔÛÃÕÀÇ]+)', nome_arquivo)
+    if match:
+        ano = match.group(1)
+        mes = match.group(2).upper()
+        return f"{tipo.upper()}_{mes}{ano}.txt"
+    # Fallback caso o padrão não seja encontrado
+    return nome_arquivo
+
+
 def enviar_gold_para_slack(**context):
 
     slack_token = os.environ.get("SLACK_BOT_TOKEN")
@@ -508,6 +519,7 @@ def enviar_gold_para_slack(**context):
 
         tipo = item["tipo"]
         nome_arquivo = item["nome"].replace(".xlsx", ".txt")
+        nome_slack = formatar_nome_slack(tipo, nome_arquivo)
 
         caminho_gold = os.path.join(GOLD_DIR, tipo, nome_arquivo)
 
@@ -520,8 +532,8 @@ def enviar_gold_para_slack(**context):
             client.files_upload_v2(
                 channel=SLACK_CHANNEL,
                 file=caminho_gold,
-                title=f"Gold - {tipo}",
-                initial_comment=f"Arquivo atualizado: {nome_arquivo}"
+                title=nome_slack,
+                initial_comment=f"Arquivo atualizado: {nome_slack}"
             )
 
             print(f"Enviado: {nome_arquivo}")
