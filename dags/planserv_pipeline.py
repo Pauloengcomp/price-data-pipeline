@@ -158,39 +158,8 @@ def gerar_silver(**context):
         else:
             silver_medicamentos(df, caminho_saida)
 
-def processar_tipo_silver(context, tipo_alvo):
-
-    arquivos = context["ti"].xcom_pull(
-        key="arquivos_baixados",
-        task_ids="download_files"
-    )
-
-    for item in arquivos:
-
-        if item["tipo"] != tipo_alvo:
-            continue
-
-        caminho_excel = item["caminho"]
-
-        pasta_destino = os.path.join(SILVER_DIR, tipo_alvo)
-        os.makedirs(pasta_destino, exist_ok=True)
-
-        nome_arquivo = os.path.basename(caminho_excel).replace(".xlsx", ".txt")
-        caminho_saida = os.path.join(pasta_destino, nome_arquivo)
-
-        df = pd.read_excel(
-            caminho_excel,
-            engine="openpyxl",
-            dtype=str
-        )
 
 
-        if tipo_alvo == "materiais":
-            silver_materiais(df, caminho_saida)
-        else:
-            silver_medicamentos(df, caminho_saida)
-
-    
 def silver_materiais(df, caminho_saida):
 
     # A planilha de materiais possui 1 linha de cabeçalho antes dos dados reais
@@ -281,42 +250,8 @@ def gerar_gold(**context):
             gold_medicamentos(df, caminho_saida)
 
 
-def processar_tipo_gold(context, tipo_alvo):
 
-    arquivos = context["ti"].xcom_pull(
-        key="arquivos_baixados",
-        task_ids="download_files"
-    )
 
-    for item in arquivos:
-
-        if item["tipo"] != tipo_alvo:
-            continue
-
-        nome_arquivo = item["nome"].replace(".xlsx", ".txt")
-
-        caminho_silver = os.path.join(SILVER_DIR, tipo_alvo, nome_arquivo)
-
-        pasta_destino = os.path.join(GOLD_DIR, tipo_alvo)
-        os.makedirs(pasta_destino, exist_ok=True)
-
-        caminho_saida = os.path.join(pasta_destino, nome_arquivo)
-
-        df = pd.read_csv(
-            caminho_silver,
-            sep="|",
-            header=None,
-            dtype=str,
-            encoding="utf-8"
-        )
-
-        if tipo_alvo == "materiais":
-            gold_materiais(df, caminho_saida)
-        else:
-            gold_medicamentos(df, caminho_saida)
-
-        
-        
 def gold_materiais(df, caminho_saida):
 
     indices = [7, 8, 12, 12, 1, 2, 3, 0, 9]
@@ -375,28 +310,6 @@ def gold_medicamentos(df, caminho_saida):
     )
 
     print(f"GOLD MEDICAMENTOS gerado: {caminho_saida}")
-
-
-def transformar_arquivos(**context):
-
-    arquivos = context["ti"].xcom_pull(
-        key="arquivos_baixados",
-        task_ids="extract_planserv"
-    )
-
-    if not arquivos:
-        raise Exception("Nenhum arquivo encontrado no XCom.")
-
-    for arquivo in arquivos:
-        tipo = arquivo["tipo"]
-        caminho = arquivo["caminho"]
-
-        if tipo == "materiais":
-            transformar_materiais(caminho)
-
-        elif tipo == "medicamentos":
-            print("Transformação de medicamentos ainda não implementada.")
-
 
 
 
@@ -544,9 +457,6 @@ def enviar_gold_para_slack(**context):
 
 
 
-def processar_arquivo():
-    print("Processando arquivo...")
-
 
 def atualizar_estado(**context):
 
@@ -624,8 +534,8 @@ with DAG(
     )
     
     send_slack = PythonOperator(
-    task_id="send_to_slack",
-    python_callable=enviar_gold_para_slack
+        task_id="send_to_slack",
+        python_callable=enviar_gold_para_slack
     )
 
 
