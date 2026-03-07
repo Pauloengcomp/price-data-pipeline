@@ -92,15 +92,16 @@ Em caso de falha em qualquer task de processamento, uma notificação é enviada
 │   ├── planserv_pipeline.py
 │   ├── cmed_tuss_pipeline.py
 │   └── downloads/
-│       ├── raw/
-│       │   ├── materiais/
-│       │   └── medicamentos/
-│       ├── silver/
-│       │   ├── materiais/
-│       │   └── medicamentos/
-│       ├── gold/
-│       │   ├── materiais/
-│       │   └── medicamentos/
+│       ├── planserv/
+│       │   ├── raw/
+│       │   │   ├── materiais/
+│       │   │   └── medicamentos/
+│       │   ├── silver/
+│       │   │   ├── materiais/
+│       │   │   └── medicamentos/
+│       │   └── gold/
+│       │       ├── materiais/
+│       │       └── medicamentos/
 │       └── cmed_tuss/
 │           ├── raw/
 │           │   ├── cmed/
