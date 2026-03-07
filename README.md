@@ -1,122 +1,175 @@
-# Planserv Data Pipeline
+# Price Data Pipeline
 
-Pipeline de dados automatizado para ingestão, processamento e disponibilização de tabelas estruturadas, seguindo arquitetura em camadas (RAW → SILVER → GOLD), orquestrado com Apache Airflow.
+Pipeline de dados automatizado para ingestão, processamento e disponibilização de tabelas de preços de saúde, seguindo arquitetura em camadas (RAW → SILVER → GOLD), orquestrado com Apache Airflow.
 
-# Visão Geral
+---
 
-Este projeto implementa um fluxo de dados automatizado responsável por:
+## Visão Geral
 
-Extrair arquivos de uma API externa
-Persistir dados brutos (camada RAW)
-Aplicar transformações e padronizações (camada SILVER)
-Refinar dados para regras de negócio (camada GOLD)
-Disponibilizar os dados tratados para consumo analítico e automações
-A orquestração é realizada via DAG no Apache Airflow, executando em ambiente Docker.
+O projeto contém duas DAGs independentes que monitoram fontes externas, detectam atualizações, processam os dados em camadas e entregam os arquivos tratados via Slack.
 
-# Arquitetura
+| DAG | Fonte | Frequência |
+|---|---|---|
+| `planserv_data_pipeline` | API Planserv (Maida Health) | A cada 12 horas |
+| `cmed_tuss_pipeline` | ANVISA/CMED + ANS/TUSS | A cada 12 horas |
 
-O projeto segue o padrão moderno de engenharia de dados em camadas:
+---
 
-           ┌────────────┐
-           │   API      │
-           └──────┬─────┘
-                  │
-                  ▼
-            RAW (dados brutos)
-                  │
-                  ▼
-          SILVER (padronização)
-                  │
-                  ▼
-          GOLD (regra de negócio)
-                  │
-                  ▼
-        Consumo / Automação / BI
-## RAW
+## Pipelines
 
-Armazena os arquivos exatamente como recebidos
-Mantém histórico
-Sem alterações estruturais
+### planserv_data_pipeline
 
-## SILVER
+Processa as tabelas de **Materiais e OPME** e **Medicamentos** publicadas pela Planserv via API.
 
-Limpeza de dados
-Padronização de colunas
-Tratamento de encoding
-Remoção de inconsistências
-Normalização de formatos
+**Fluxo de tasks:**
 
-## GOLD
+```
+extract_metadata → check_if_new → download_files → generate_silver → generate_gold → send_to_slack → update_state
+                               ↘ stop_pipeline
+```
 
-Aplicação de regras de negócio
-Seleção de campos relevantes
-Estrutura pronta para consumo analítico
-Base para dashboards ou automações (ex: Slack Bot)
+**Etapas:**
+- `extract_metadata` — consulta a API e extrai URL, nome e `updatedAt` de cada arquivo
+- `check_if_new` — compara `updatedAt` com o estado salvo; pula se não houver mudança
+- `download_files` — baixa os arquivos XLSX para a camada RAW
+- `generate_silver` — normaliza encoding, remove linhas vazias e salva como TXT pipe-delimited
+- `generate_gold` — seleciona colunas relevantes por índice para cada tipo
+- `send_to_slack` — envia os arquivos GOLD com nome formatado (`TIPO_MESANO.txt`)
+- `update_state` — persiste `updatedAt` em `state/state.json`
 
-# Stack Tecnológica
+---
 
-Python
-Apache Airflow
-Docker
-Pandas
-Requests
-Estrutura de controle de estado via JSON
+### cmed_tuss_pipeline
 
-# Estrutura do Projeto
+Cruza a tabela **CMED PMC** (preços de medicamentos da ANVISA) com a **Tabela 20 TUSS** (terminologia ANS), enriquecendo os itens CMED com o código TUSS correspondente.
+
+**Fluxo de tasks:**
+
+```
+extract_cmed_url → check_if_new → download_files → generate_silver → generate_gold → send_to_slack → update_state
+                               ↘ stop_pipeline
+```
+
+**Etapas:**
+- `extract_cmed_url` — faz scraping da página ANVISA/CMED para localizar a URL do arquivo PMC mais recente
+- `check_if_new` — compara a URL com a salva em `state/cmed_tuss_state.json`; pula se não houver mudança
+- `download_files` — baixa o XLSX da CMED (com retry e validação de integridade) e o ZIP do TUSS, extraindo a tabela 20 de medicamentos
+- `generate_silver` — normaliza ambos os arquivos para TXT pipe-delimited
+- `generate_gold` — realiza left join CMED × TUSS pelo campo REGISTRO; gera também um arquivo separado com os itens sem correspondência no TUSS
+- `send_to_slack` — envia o arquivo GOLD (`CMED_PMC_MESANO.txt`) e o relatório de itens sem correspondência
+- `update_state` — persiste a URL processada em `state/cmed_tuss_state.json`
+
+Em caso de falha em qualquer task de processamento, uma notificação é enviada automaticamente ao Slack.
+
+---
+
+## Arquitetura de Camadas
+
+```
+   Fonte externa
+        │
+        ▼
+   RAW  — arquivos originais sem modificação
+        │
+        ▼
+ SILVER — normalização: encoding UTF-8, remoção de linhas vazias,
+          separador pipe (|), remoção de quebras de linha internas
+        │
+        ▼
+   GOLD — seleção de colunas / enriquecimento com regra de negócio
+        │
+        ▼
+  Slack — entrega dos arquivos para consumo
+```
+
+---
+
+## Estrutura do Projeto
+
+```
 .
 ├── dags/
-│   ├── pipeline.py
+│   ├── planserv_pipeline.py
+│   ├── cmed_tuss_pipeline.py
 │   └── downloads/
 │       ├── raw/
+│       │   ├── materiais/
+│       │   └── medicamentos/
 │       ├── silver/
-│       └── gold/
+│       │   ├── materiais/
+│       │   └── medicamentos/
+│       ├── gold/
+│       │   ├── materiais/
+│       │   └── medicamentos/
+│       └── cmed_tuss/
+│           ├── raw/
+│           │   ├── cmed/
+│           │   └── tuss/
+│           ├── silver/
+│           │   ├── cmed/
+│           │   └── tuss/
+│           └── gold/
 ├── state/
-│   └── state.json
+│   ├── state.json           # estado do planserv_data_pipeline
+│   └── cmed_tuss_state.json # estado do cmed_tuss_pipeline
 ├── docker-compose.yml
 └── README.md
+```
 
-# Orquestração
+---
 
-##A DAG executa:
+## Stack
 
-Extração de dados da API
-Validação de alteração via controle de hash
-Processamento incremental
-Tratamento de exceções
-Persistência em camadas
-Finalização condicional
+- Python 3
+- Apache Airflow 2.8.1
+- Docker + Docker Compose
+- PostgreSQL 15 (metadados do Airflow)
+- Pandas + openpyxl
+- Requests + BeautifulSoup4 + lxml
+- slack_sdk
 
-##Configuração típica:
+---
 
-schedule_interval="0 */12 * * *"  (Execução a cada 12 horas)
+## Configuração
 
-# Tratamento de Erros
+### Variáveis de ambiente
 
-Controle de estado para evitar reprocessamento desnecessário
-Validação de resposta HTTP
-Retry automático via Airflow
-Separação clara de responsabilidades por função
+Crie um arquivo `.env` na raiz do projeto com:
 
-# Possíveis Evoluções
+```env
+SLACK_BOT_TOKEN=xoxb-seu-token-aqui
+SLACK_CHANNEL=ID_DO_CANAL
+```
 
-Paralelismo com LocalExecutor ou CeleryExecutor
-Persistência em banco relacional
-Armazenamento em Data Lake (S3 / GCS)
-Monitoramento via logs estruturados
-Integração com ferramentas de BI
-Testes automatizados (Pytest)
+> `SLACK_CHANNEL` tem como padrão `C0AGNL16ZS4` caso não seja definido.
 
-# Como Executar
+O bot do Slack precisa das permissões `chat:write` e `files:write`.
 
-Subir ambiente: docker-compose up -d
-Acessar Airflow: http://localhost:8080
-Ativar a DAG
-Executar manualmente ou aguardar agendamento
+---
 
-# Objetivo do Projeto
+## Como Executar
 
-Demonstrar implementação prática de:
-Arquitetura de dados em camadas
-Orquestração com Airflow
-Processamento incremental
-Engenharia de dados aplicada a cenário real
+```bash
+# 1. Subir o ambiente
+docker-compose up -d
+
+# 2. Inicializar o banco e criar usuário admin
+#    (executado automaticamente pelo serviço airflow-init)
+
+# 3. Acessar a UI do Airflow
+http://localhost:8080
+# usuário: admin | senha: admin
+
+# 4. Ativar as DAGs desejadas e executar manualmente ou aguardar o agendamento
+```
+
+---
+
+## Controle de Estado
+
+Cada pipeline mantém um arquivo JSON em `state/` para evitar reprocessamento desnecessário:
+
+- **Planserv:** compara o campo `updatedAt` retornado pela API por arquivo
+- **CMED/TUSS:** compara a URL do arquivo PMC detectado na página da ANVISA
+
+Se nenhuma mudança for detectada, a execução termina na task `stop_pipeline` sem processar ou notificar.
