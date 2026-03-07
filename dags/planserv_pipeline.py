@@ -502,7 +502,8 @@ with DAG(
     dag_id="planserv_data_pipeline",
     start_date=datetime(2025, 1, 1),
     schedule_interval="0 */12 * * *",
-    catchup=False
+    catchup=False,
+    max_active_runs=1
 ) as dag:
 
 

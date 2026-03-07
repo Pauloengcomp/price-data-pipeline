@@ -35,7 +35,14 @@ TUSS_CODE_COL = 0
 
 def extrair_url_cmed(**context):
 
-    response = requests.get(CMED_PAGE_URL, timeout=30)
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        )
+    }
+    response = requests.get(CMED_PAGE_URL, timeout=30, headers=headers)
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "lxml")
@@ -94,12 +101,45 @@ def baixar_arquivos(**context):
     os.makedirs(RAW_CMED_DIR, exist_ok=True)
     caminho_cmed = os.path.join(RAW_CMED_DIR, nome_cmed)
 
-    print(f"Baixando CMED PMC: {nome_cmed}...")
-    r = requests.get(url_cmed, stream=True, timeout=60)
-    r.raise_for_status()
-    with open(caminho_cmed, "wb") as f:
-        for chunk in r.iter_content(chunk_size=8192):
-            f.write(chunk)
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        )
+    }
+
+    for tentativa in range(1, 4):
+        print(f"Baixando CMED PMC: {nome_cmed}... (tentativa {tentativa}/3)")
+        r = requests.get(url_cmed, stream=True, timeout=300, headers=headers)
+        r.raise_for_status()
+
+        content_type = r.headers.get("Content-Type", "")
+        print(f"Content-Type recebido: {content_type}")
+        if "html" in content_type.lower():
+            raise Exception(
+                f"Servidor retornou HTML em vez do arquivo XLSX. "
+                f"Content-Type: {content_type}. URL: {url_cmed}"
+            )
+
+        with open(caminho_cmed, "wb") as f:
+            for chunk in r.iter_content(chunk_size=1024 * 1024):
+                f.write(chunk)
+
+        tamanho = os.path.getsize(caminho_cmed)
+        print(f"Arquivo salvo: {tamanho} bytes")
+
+        if zipfile.is_zipfile(caminho_cmed):
+            print("Arquivo validado com sucesso.")
+            break
+
+        if tentativa < 3:
+            print(f"Arquivo incompleto ({tamanho} bytes). Retentando...")
+        else:
+            raise Exception(
+                f"Download da CMED incompleto após 3 tentativas. "
+                f"Último tamanho: {tamanho} bytes. O servidor pode estar cortando a conexão."
+            )
 
     print("Baixando TUSS ZIP...")
     r = requests.get(TUSS_ZIP_URL, stream=True, timeout=120)
@@ -352,7 +392,8 @@ with DAG(
     dag_id="cmed_tuss_pipeline",
     start_date=datetime(2025, 1, 1),
     schedule_interval="0 */12 * * *",
-    catchup=False
+    catchup=False,
+    max_active_runs=1
 ) as dag:
 
     extract_url = PythonOperator(
