@@ -16,7 +16,7 @@ STATE_PATH = "/opt/airflow/state/state.json"
 SLACK_CHANNEL = os.environ.get("SLACK_CHANNEL", "C0AGNL16ZS4")
 
 
-BASE_DOWNLOAD_DIR = "/opt/airflow/dags/downloads"
+BASE_DOWNLOAD_DIR = "/opt/airflow/dags/downloads/planserv"
 RAW_DIR = os.path.join(BASE_DOWNLOAD_DIR, "raw")
 SILVER_DIR = os.path.join(BASE_DOWNLOAD_DIR, "silver")
 GOLD_DIR = os.path.join(BASE_DOWNLOAD_DIR, "gold")
