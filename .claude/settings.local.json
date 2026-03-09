@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh api users/Pauloengcomp)",
+      "Bash(gh api users/Pauloengcomp/repos --jq '[.[] | {name: .name, description: .description, language: .language, topics: .topics}]')",
+      "WebFetch(domain:github.com)"
+    ]
+  }
+}

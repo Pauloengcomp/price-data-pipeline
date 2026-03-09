@@ -191,15 +191,18 @@ def gerar_silver(**context):
 
     df_cmed = pd.read_excel(caminho_cmed, engine="openpyxl", dtype=str)
 
-    # Ajustar o iloc conforme estrutura real do arquivo após primeira inspeção
-    df_cmed = df_cmed.iloc[0:]
+    # Remove as 30 primeiras linhas de orientação/cabeçalho do documento
+    df_cmed = df_cmed.iloc[30:]
     df_cmed = df_cmed.replace(r'^\s*$', '', regex=True)
+    df_cmed = df_cmed.replace(r'^\s*-+\s*$', '', regex=True)
     df_cmed = df_cmed.dropna(how="all")
     df_cmed = df_cmed.fillna("")
     df_cmed = df_cmed.astype(str)
     df_cmed = df_cmed.replace(r"\n", " ", regex=True)
     df_cmed = df_cmed.replace(r"\r", " ", regex=True)
     df_cmed = df_cmed.replace('"', '', regex=True)
+
+    df_cmed = df_cmed.drop(df_cmed.columns[[6, 7]], axis=1)
 
     df_cmed.to_csv(caminho_silver_cmed, sep="|", index=False, header=False, encoding="utf-8")
     print(f"SILVER CMED gerado: {caminho_silver_cmed}")
