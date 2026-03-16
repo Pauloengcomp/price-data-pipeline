@@ -400,15 +400,13 @@ def notificar_erro_slack(context):
         print(f"Falha ao enviar notificação de erro para o Slack: {e}")
 
 
-def formatar_nome_slack(tipo, nome_arquivo):
-    # Extrai ano e mês do nome original, ex: Tabela_de_Medicamentos_2026_02_Fevereiro.txt
-    match = re.search(r'_(\d{4})_\d{2}_([A-Za-záéíóúâêîôûãõàèìòùçÁÉÍÓÚÂÊÎÔÛÃÕÀÇ]+)', nome_arquivo)
-    if match:
-        ano = match.group(1)
-        mes = match.group(2).upper()
-        return f"{tipo.upper()}_{mes}{ano}.txt"
-    # Fallback caso o padrão não seja encontrado
-    return nome_arquivo
+def formatar_nome_slack(tipo, updated_at):
+    # Deriva mês e ano do updatedAt ISO (ex: "2026-03-15T10:00:00.000Z")
+    dt = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+    mes = str(dt.month).zfill(2)
+    ano = str(dt.year)[2:]
+    prefixo = "MAT" if tipo == "materiais" else "MED"
+    return f"PLANSERV_{prefixo}_{mes}_{ano}.txt"
 
 
 def enviar_gold_para_slack(**context):
@@ -432,7 +430,7 @@ def enviar_gold_para_slack(**context):
 
         tipo = item["tipo"]
         nome_arquivo = item["nome"].replace(".xlsx", ".txt")
-        nome_slack = formatar_nome_slack(tipo, nome_arquivo)
+        nome_slack = formatar_nome_slack(tipo, item["updatedAt"])
 
         caminho_gold = os.path.join(GOLD_DIR, tipo, nome_arquivo)
 
