@@ -1,13 +1,13 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator, BranchPythonOperator
 from airflow.operators.empty import EmptyOperator
-from airflow.models import Variable
 from datetime import datetime
 import json
 import os
 import re
 import requests
 import urllib.parse
+from html.parser import HTMLParser
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
@@ -52,10 +52,10 @@ ALL_COLS = [
 
 
 def obter_cookie():
-    try:
-        return Variable.get("BRASINDICE_COOKIE")
-    except Exception:
-        raise Exception("Variável BRASINDICE_COOKIE não configurada no Airflow (Admin → Variables).")
+    cookie = os.environ.get("BRASINDICE_COOKIE")
+    if not cookie:
+        raise Exception("Variável de ambiente BRASINDICE_COOKIE não configurada.")
+    return cookie
 
 
 def build_payload(tipo, colunas):
@@ -126,6 +126,16 @@ def notificar_cookie_expirado():
         print(f"Falha ao notificar Slack: {e}")
 
 
+def extrair_sugar_token(html):
+    match = re.search(r'name=["\']sugar_token["\']\s+value=["\']([^"\']+)["\']', html)
+    if match:
+        return match.group(1)
+    match = re.search(r'value=["\']([^"\']+)["\']\s+name=["\']sugar_token["\']', html)
+    if match:
+        return match.group(1)
+    return None
+
+
 def notificar_erro_slack(context):
     slack_token = os.environ.get("SLACK_BOT_TOKEN")
     if not slack_token:
@@ -153,19 +163,59 @@ def checar_edicao(**context):
     )
 
     session = requests.Session()
-    session.cookies.set("ck_login_id_20", cookie, domain="assinantes.brasindice.com.br")
+    session.verify = False
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Origin": "https://assinantes.brasindice.com.br",
+        "Referer": "https://assinantes.brasindice.com.br/index.php?module=Home&action=index&mode=export",
+        "Sec-Fetch-Dest": "frame",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-origin",
+        "Upgrade-Insecure-Requests": "1",
+    })
+    for name, value in [
+        ("ck_login_id_20", cookie),
+        ("ck_login_theme_20", "Online"),
+        ("ck_login_language_20", "pt_br"),
+        ("cookieaccept", "1"),
+        ("warning_fraud", "1"),
+    ]:
+        session.cookies.set(name, value, domain="assinantes.brasindice.com.br")
+
+    # 1º GET: autentica via ck_login_id_20 (redireciona para home, estabelece PHPSESSID)
+    session.get(URL, timeout=30)
+
+    # 2º GET: navega ao módulo com PHPSESSID já autenticado
+    get_resp = session.get(f"{URL}?module=Brasindice&action=CustomExport", timeout=30)
+    title = re.search(r'<title>(.*?)</title>', get_resp.text)
+    print(f"DEBUG GET title: {title.group(1) if title else 'not found'}")
+    sugar_token = extrair_sugar_token(get_resp.text)
+    print(f"DEBUG sugar_token: {sugar_token}")
+
+    payload_data = build_payload(tipo_probe["tipo"], tipo_probe["colunas"])
+    if sugar_token:
+        payload_data.append(("sugar_token", sugar_token))
+    body = urllib.parse.urlencode(payload_data, encoding="iso-8859-1")
 
     r = session.post(
         URL,
         data=body,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         timeout=60,
+        allow_redirects=False,
         stream=True,
     )
+    print(f"DEBUG status_code: {r.status_code}")
+    print(f"DEBUG location: {r.headers.get('Location', '')}")
+    print(f"DEBUG content_type: {r.headers.get('Content-Type', '')}")
+    print(f"DEBUG content_disposition: {r.headers.get('Content-Disposition', '')}")
     r.raise_for_status()
 
     content_type = r.headers.get("Content-Type", "")
     if "text/html" in content_type:
+        print(f"DEBUG body (500 chars): {r.content[:500]}")
         r.close()
         notificar_cookie_expirado()
         raise Exception("Cookie do Brasíndice expirado. Slack notificado.")
@@ -189,7 +239,28 @@ def baixar_arquivos(**context):
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
     session = requests.Session()
-    session.cookies.set("ck_login_id_20", cookie, domain="assinantes.brasindice.com.br")
+    session.verify = False
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Origin": "https://assinantes.brasindice.com.br",
+        "Referer": "https://assinantes.brasindice.com.br/index.php?module=Home&action=index&mode=export",
+        "Sec-Fetch-Dest": "frame",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-origin",
+        "Upgrade-Insecure-Requests": "1",
+    })
+    for name, value in [
+        ("ck_login_id_20", cookie),
+        ("ck_login_theme_20", "Online"),
+        ("ck_login_language_20", "pt_br"),
+        ("cookieaccept", "1"),
+        ("warning_fraud", "1"),
+    ]:
+        session.cookies.set(name, value, domain="assinantes.brasindice.com.br")
+
+    session.get(URL, timeout=30)
 
     arquivos = []
 
