@@ -400,8 +400,33 @@ def notificar_erro_slack(context):
         print(f"Falha ao enviar notificação de erro para o Slack: {e}")
 
 
-def formatar_nome_slack(tipo, updated_at):
-    # Deriva mês e ano do updatedAt ISO (ex: "2026-03-15T10:00:00.000Z")
+MESES_PT = {
+    "janeiro": "01", "fevereiro": "02", "março": "03", "marco": "03",
+    "abril": "04", "maio": "05", "junho": "06",
+    "julho": "07", "agosto": "08", "setembro": "09",
+    "outubro": "10", "novembro": "11", "dezembro": "12",
+}
+
+
+def formatar_nome_slack(tipo, nome_arquivo, updated_at):
+    # 1. Tenta padrão _YYYY_MM_ no nome do arquivo (ex: _2026_04_Abril)
+    match = re.search(r'_(\d{4})_(\d{2})_', nome_arquivo)
+    if match:
+        ano = match.group(1)[2:]
+        mes = match.group(2)
+        prefixo = "MAT" if tipo == "materiais" else "MED"
+        return f"PLANSERV_{prefixo}_{mes}_{ano}.txt"
+
+    # 2. Tenta nome do mês em português + ano de 2 dígitos no final do arquivo
+    nome_lower = nome_arquivo.lower()
+    for nome_mes, num_mes in MESES_PT.items():
+        if nome_mes in nome_lower:
+            ano_match = re.search(r'(\d{2})(?:\.\w+)?$', nome_arquivo)
+            if ano_match:
+                prefixo = "MAT" if tipo == "materiais" else "MED"
+                return f"PLANSERV_{prefixo}_{num_mes}_{ano_match.group(1)}.txt"
+
+    # 3. Fallback: usa updated_at (não reflete o mês de competência)
     dt = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
     mes = str(dt.month).zfill(2)
     ano = str(dt.year)[2:]
@@ -430,7 +455,7 @@ def enviar_gold_para_slack(**context):
 
         tipo = item["tipo"]
         nome_arquivo = item["nome"].replace(".xlsx", ".txt")
-        nome_slack = formatar_nome_slack(tipo, item["updatedAt"])
+        nome_slack = formatar_nome_slack(tipo, nome_arquivo, item["updatedAt"])
 
         caminho_gold = os.path.join(GOLD_DIR, tipo, nome_arquivo)
 
