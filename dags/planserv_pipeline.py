@@ -31,14 +31,22 @@ def extrair_metadata_planserv(**context):
     json_data = response.json()
     data = json_data.get("data", [])
 
-    arquivos_metadata = []
+    # A API não garante que "ordem" reflita qual arquivo é o mais atual
+    # (já aconteceu de vir fora da posição esperada), então o tipo é
+    # identificado pelo título do item e o mais recente de cada tipo é
+    # escolhido pela data de atualização do próprio arquivo.
+    candidatos = {"materiais": [], "medicamentos": []}
 
     for item in data:
 
         attributes = item.get("attributes", {})
-        ordem = attributes.get("ordem")
+        titulo = (attributes.get("titulo") or "").lower()
 
-        if ordem not in (1, 2):
+        if "materiais" in titulo:
+            tipo = "materiais"
+        elif "medicamentos" in titulo:
+            tipo = "medicamentos"
+        else:
             continue
 
         arquivo_data = attributes.get("arquivo", {}).get("data")
@@ -54,18 +62,25 @@ def extrair_metadata_planserv(**context):
         if not url_relativa or not nome_arquivo or not updated_at:
             continue
 
-        # Define tipo baseado na ordem
-        if ordem == 1:
-            tipo = "materiais"
-        elif ordem == 2:
-            tipo = "medicamentos"
-
-        arquivos_metadata.append({
+        candidatos[tipo].append({
             "tipo": tipo,
             "nome": nome_arquivo,
             "url": BASE_URL + url_relativa,
             "updatedAt": updated_at
         })
+
+    arquivos_metadata = []
+
+    for tipo, itens in candidatos.items():
+        if not itens:
+            print(f"Nenhum arquivo de '{tipo}' encontrado na API.")
+            continue
+
+        mais_recente = max(
+            itens,
+            key=lambda x: datetime.fromisoformat(x["updatedAt"].replace("Z", "+00:00"))
+        )
+        arquivos_metadata.append(mais_recente)
 
     if not arquivos_metadata:
         raise Exception("Nenhum arquivo válido encontrado na API.")
